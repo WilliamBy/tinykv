@@ -14,7 +14,9 @@
 
 package raft
 
-import pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+import (
+	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+)
 
 // RaftLog manage the log entries, its struct look like:
 //
@@ -56,7 +58,18 @@ type RaftLog struct {
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
-	return nil
+	raftLog := &RaftLog{storage: storage}
+	hs, _, _ := storage.InitialState()
+	raftLog.committed = hs.Commit
+	raftLog.stabled, _ = storage.LastIndex()
+	// extract entries from storage
+	ents := make([]pb.Entry, 0)
+	first, _ := storage.FirstIndex()
+	last, _ := storage.LastIndex()
+	s_ents, _ := storage.Entries(first, last+1)
+	copy(ents, s_ents)
+	raftLog.entries = ents
+	return raftLog
 }
 
 // We need to compact the log entries in some point of time like
@@ -69,23 +82,56 @@ func (l *RaftLog) maybeCompact() {
 // unstableEntries return all the unstable entries
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
-	return nil
+	return l.entries[l.stabled-l.FirstIndex()+1 : l.LastIndex()+1]
 }
 
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
-	return nil
+	return l.entries[l.applied-l.FirstIndex()+1 : l.committed+1]
 }
 
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
-	return 0
+	if len(l.entries) == 0 {
+		return 0
+	}
+	return l.entries[len(l.entries)-1].Index
+}
+
+// FirstIndex return the first index of the log entries
+func (l *RaftLog) FirstIndex() uint64 {
+	// Your Code Here (2A).
+	if len(l.entries) == 0 {
+		return 0
+	}
+	return l.entries[0].Index
 }
 
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
-	return 0, nil
+	if l.FirstIndex() == 0 {
+		return 0, nil
+	}
+	if i < l.FirstIndex() || i > l.LastIndex() {
+		return 0, ErrUnavailable
+	}
+	return l.entries[i-l.FirstIndex()].Term, nil
+}
+
+func (l *RaftLog) appendEntries(ents []*pb.Entry) {
+	for i, _ := range ents {
+		ents[i].Index = l.LastIndex() + 1
+		l.entries = append(l.entries, *ents[i])
+	}
+}
+
+// transfer the index of log to the index of slice
+func (l *RaftLog) sliceIndex(logIndex uint64) int {
+	if logIndex < l.FirstIndex() || logIndex > l.LastIndex() {
+		return -1
+	}
+	return int(logIndex - l.FirstIndex())
 }

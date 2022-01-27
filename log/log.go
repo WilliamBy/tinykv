@@ -80,6 +80,10 @@ func Infof(format string, v ...interface{}) {
 	_log.Infof(format, v...)
 }
 
+func Show(v ...interface{}) {
+	Infof("%+v\n", v)
+}
+
 func Panic(v ...interface{}) {
 	_log.Panic(v...)
 }

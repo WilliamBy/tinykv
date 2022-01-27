@@ -208,7 +208,7 @@ stale log entries:
 	type to redirect proposals to the leader. Therefore, send method overwrites
 	eraftpb.Message's term with its HardState's term to avoid attaching its
 	local term to 'MessageType_MsgPropose'. When 'MessageType_MsgPropose' is passed to the leader's 'Step'
-	method, the leader first calls the 'appendEntry' method to append entries
+	method, the leader first calls the 'appendEntries' method to append entries
 	to its log, and then calls 'bcastAppend' method to send those entries to
 	its peers. When passed to candidate, 'MessageType_MsgPropose' is dropped. When passed to
 	follower, 'MessageType_MsgPropose' is stored in follower's mailbox(msgs) by the send
