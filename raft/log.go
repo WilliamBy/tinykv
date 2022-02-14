@@ -63,12 +63,10 @@ func newLog(storage Storage) *RaftLog {
 	raftLog.committed = hs.Commit
 	raftLog.stabled, _ = storage.LastIndex()
 	// extract entries from storage
-	ents := make([]pb.Entry, 0)
 	first, _ := storage.FirstIndex()
 	last, _ := storage.LastIndex()
 	s_ents, _ := storage.Entries(first, last+1)
-	copy(ents, s_ents)
-	raftLog.entries = ents
+	raftLog.entries = s_ents
 	return raftLog
 }
 
@@ -82,13 +80,20 @@ func (l *RaftLog) maybeCompact() {
 // unstableEntries return all the unstable entries
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
-	return l.entries[l.stabled-l.FirstIndex()+1 : l.LastIndex()+1]
+	return l.entries[l.sliceIndex(l.stabled)+1:]
 }
 
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
-	return l.entries[l.applied-l.FirstIndex()+1 : l.committed+1]
+	ents = make([]pb.Entry, 0)
+	si4apply, si4commit := l.sliceIndex(l.applied), l.sliceIndex(l.committed)
+	if si4commit != -1 && si4apply != -1 {
+		ents = l.entries[si4apply+1 : si4commit+1]
+	} else if l.applied == 0 {
+		ents = l.entries[:si4commit+1]
+	}
+	return
 }
 
 // LastIndex return the last index of the log entries

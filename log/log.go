@@ -282,3 +282,7 @@ func NewLogger(w io.Writer, prefix string) *Logger {
 	}
 	return &Logger{_log: log.New(w, prefix, LstdFlags), level: level, highlighting: true}
 }
+
+var (
+	Flag_1 = false
+)

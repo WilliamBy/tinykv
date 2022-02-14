@@ -62,6 +62,10 @@ project2a:
 project2aa:
 	$(GOTEST) ./raft -run 2AA
 
+tmp:
+	$(GOTEST) ./raft -run TestHandleMessageType_MsgAppend2AB
+
+
 project2ab:
 	$(GOTEST) ./raft -run 2AB
 
