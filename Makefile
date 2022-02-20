@@ -63,7 +63,7 @@ project2aa:
 	$(GOTEST) ./raft -run 2AA
 
 tmp:
-	$(GOTEST) ./raft -run TestHandleMessageType_MsgAppend2AB
+	$(GOTEST) ./raft -run TestDuelingCandidates2AB
 
 
 project2ab:

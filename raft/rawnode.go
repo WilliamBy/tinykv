@@ -97,6 +97,7 @@ func (rn *RawNode) Propose(data []byte) error {
 	return rn.Raft.Step(pb.Message{
 		MsgType: pb.MessageType_MsgPropose,
 		From:    rn.Raft.id,
+		To:      rn.Raft.id,
 		Entries: []*pb.Entry{&ent}})
 }
 
@@ -144,7 +145,27 @@ func (rn *RawNode) Step(m pb.Message) error {
 // Ready returns the current point-in-time state of this RawNode.
 func (rn *RawNode) Ready() Ready {
 	// Your Code Here (2A).
-	return Ready{}
+	r := rn.Raft
+	ss := SoftState{
+		Lead:      r.Lead,
+		RaftState: 0,
+	}
+	hs := pb.HardState{
+		Term:   r.Term,
+		Vote:   r.Vote,
+		Commit: r.RaftLog.committed,
+	}
+	ready := Ready{
+		SoftState:        &ss,
+		HardState:        hs,
+		Entries:          r.RaftLog.unstableEntries(),
+		CommittedEntries: r.RaftLog.nextEnts(),
+		Messages:         r.msgs,
+	}
+	if r.RaftLog.pendingSnapshot != nil {
+		ready.Snapshot = *r.RaftLog.pendingSnapshot
+	}
+	return ready
 }
 
 // HasReady called when RawNode user need to check if any Ready pending.

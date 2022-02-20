@@ -16,7 +16,6 @@ package raft
 
 import (
 	"errors"
-	"github.com/pingcap-incubator/tinykv/log"
 	"math/rand"
 	"sort"
 
@@ -128,6 +127,9 @@ type Raft struct {
 	// votes records
 	votes map[uint64]bool
 
+	// rejects records
+	rejects map[uint64]bool
+
 	// msgs need to send
 	msgs []pb.Message
 
@@ -176,6 +178,7 @@ func newRaft(c *Config) *Raft {
 		id:               c.ID,
 		Prs:              make(map[uint64]*Progress),
 		votes:            make(map[uint64]bool),
+		rejects:          make(map[uint64]bool),
 		heartbeatTimeout: c.HeartbeatTick,
 		electionTimeout:  c.ElectionTick,
 		msgs:             make([]pb.Message, 0),
@@ -213,6 +216,7 @@ func newRaft(c *Config) *Raft {
 			}
 		}
 		r.votes[n] = false
+		r.rejects[n] = false
 	}
 	// random election interval
 	r.electionInterval = c.ElectionTick + rand.Intn(c.ElectionTick)
@@ -236,12 +240,21 @@ func (r *Raft) sendAppend(to uint64) bool {
 // sendHeartbeat sends a heartbeat RPC to the given peer.
 func (r *Raft) sendHeartbeat(to uint64) {
 	// Your Code Here (2A).
+	logIdx := r.Prs[to].Next - 1
+	logTerm, err := r.RaftLog.Term(logIdx)
+	if err != nil {
+		panic(err)
+	}
 	msg := pb.Message{
-		MsgType: pb.MessageType_MsgHeartbeat,
-		To:      to,
-		From:    r.id,
-		Term:    r.Term,
-		Commit:  r.RaftLog.committed,
+		MsgType:  pb.MessageType_MsgHeartbeat,
+		To:       to,
+		From:     r.id,
+		Term:     r.Term,
+		LogTerm:  logTerm,
+		Index:    logIdx,
+		Entries:  nil,
+		Commit:   r.RaftLog.committed,
+		Snapshot: nil,
 	}
 	r.msgs = append(r.msgs, msg)
 }
@@ -250,19 +263,16 @@ func (r *Raft) sendVoteReq(to uint64) {
 	lastInd := r.RaftLog.LastIndex()
 	logTerm, _ := r.RaftLog.Term(lastInd)
 	msg := pb.Message{
-		MsgType:              pb.MessageType_MsgRequestVote,
-		To:                   to,
-		From:                 r.id,
-		Term:                 r.Term,
-		LogTerm:              logTerm,
-		Index:                lastInd,
-		Entries:              nil,
-		Commit:               r.RaftLog.committed,
-		Snapshot:             nil,
-		Reject:               false,
-		XXX_NoUnkeyedLiteral: struct{}{},
-		XXX_unrecognized:     nil,
-		XXX_sizecache:        0,
+		MsgType:  pb.MessageType_MsgRequestVote,
+		To:       to,
+		From:     r.id,
+		Term:     r.Term,
+		LogTerm:  logTerm,
+		Index:    lastInd,
+		Entries:  nil,
+		Commit:   r.RaftLog.committed,
+		Snapshot: nil,
+		Reject:   false,
 	}
 	r.msgs = append(r.msgs, msg)
 }
@@ -334,8 +344,10 @@ func (r *Raft) becomeCandidate() {
 	// start a new election and vote for self
 	for n := range r.votes {
 		r.votes[n] = false
+		r.rejects[n] = false
 	}
 	r.votes[r.id] = true
+	r.rejects[r.id] = false
 	r.Vote = r.id
 }
 
@@ -418,8 +430,21 @@ func (r *Raft) stepCandidate(m pb.Message) error {
 	case pb.MessageType_MsgRequestVote:
 		r.handleRequestVote(m)
 	case pb.MessageType_MsgRequestVoteResponse:
-		if m.Reject && (m.Term > r.Term || m.LogTerm >= r.Term || m.Commit > r.RaftLog.committed) {
-			r.becomeFollower(m.Term, None)
+		if m.Reject {
+			if m.Term > r.Term {
+				r.becomeFollower(m.Term, None)
+			}
+			r.rejects[m.From] = true
+			rejNum := 0 //否决个数
+			for _, r := range r.rejects {
+				if r == true {
+					rejNum++
+				}
+			}
+			if rejNum > (len(r.votes))/2 {
+				//过半否决
+				r.becomeFollower(r.Term, None)
+			}
 		} else {
 			r.votes[m.From] = !m.Reject
 			agrNum := 0 // 赞同个数
@@ -498,11 +523,20 @@ func (r *Raft) stepLeader(m pb.Message) error {
 	case pb.MessageType_MsgHeartbeat:
 		r.handleHeartbeat(m)
 	case pb.MessageType_MsgHeartbeatResponse:
+		li := r.RaftLog.LastIndex()
 		if m.Reject {
 			r.becomeFollower(max(r.Term, m.Term), None)
 		} else {
-			if m.Index < r.RaftLog.LastIndex() {
+			if m.Index > li || m.Commit < r.RaftLog.committed {
 				r.sendAppend(m.From)
+			} else {
+				logTerm, err := r.RaftLog.Term(m.Index)
+				if err != nil {
+					panic(err)
+				}
+				if logTerm != m.LogTerm { //历史日志不一致
+					r.sendAppend(m.From)
+				}
 			}
 		}
 	case pb.MessageType_MsgTransferLeader:
@@ -529,34 +563,34 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 	if err != nil {
 		panic(err)
 	}
-	//log.Infof("reqMsg: %+v, ents: %+v, logTerm: %v, index: %v\n", m, r.RaftLog.entries, logTerm, lastInd)
-	if m.Term < r.Term || m.Commit < r.RaftLog.committed || m.LogTerm < logTerm || (m.LogTerm == logTerm && m.Index < lastInd) {
-		res.Reject = true
-	} else {
-		switch r.State {
-		case StateFollower:
-			if m.Term > r.Term {
-				r.Term = m.Term
-				r.Vote = m.From
-			} else if r.Vote != None && r.Vote != m.From {
-				res.Reject = true
-			}
-		case StateCandidate:
-			fallthrough
-		case StateLeader:
-			if m.Term > r.Term {
-				r.becomeFollower(m.Term, None)
-				r.Vote = m.From
-			} else {
-				res.Reject = true
-			}
+	switch r.State {
+	case StateFollower:
+		if m.Term > r.Term {
+			r.becomeFollower(m.Term, None)
+		} else if r.Vote != None && r.Vote != m.From {
+			res.Reject = true
 		}
+	case StateCandidate:
+		fallthrough
+	case StateLeader:
+		if m.Term > r.Term {
+			r.becomeFollower(m.Term, None)
+		} else {
+			res.Reject = true
+		}
+	}
+	if m.Term < r.Term || m.Commit < r.RaftLog.committed || m.LogTerm < logTerm || (m.LogTerm == logTerm && m.Index < lastInd) {
+		// 对方日志不是最新的
+		res.Reject = true
 	}
 	res.Index = lastInd
 	res.LogTerm = logTerm
 	res.Term = r.Term
 	res.Commit = r.RaftLog.committed
 	r.msgs = append(r.msgs, res)
+	if !res.Reject {
+		r.Vote = m.From
+	}
 }
 
 // handleAppendEntries handle AppendEntries RPC request
@@ -577,6 +611,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 				// 日志历史不匹配
 				response.Reject = true
 			} else {
+				// 日志历史匹配
 				if m.Entries != nil && len(m.Entries) != 0 {
 					// 搜索最小不匹配日志索引号
 					i := uint64(0)
@@ -590,27 +625,23 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 					}
 					if unmatch == true {
 						// 存在不匹配日志段，截断丢弃
-						r.RaftLog.entries = r.RaftLog.entries[:r.RaftLog.sliceIndex(i+m.Index+1)]
+						r.RaftLog.entries = r.RaftLog.entries[:r.RaftLog.sliceIndex(i+m.Index)+1]
 						r.RaftLog.stabled = r.RaftLog.LastIndex()
 					}
 					if i < uint64(len(m.Entries)) {
 						// 有新日志则追加新的日志
 						r.RaftLog.appendEntries(m.Entries[i:])
 					}
-				} else {
-					r.RaftLog.entries = r.RaftLog.entries[:m.Index+1-r.RaftLog.FirstIndex()]
-					r.RaftLog.stabled = r.RaftLog.LastIndex()
-					if log.Flag_1 {
-						log.Fatalf("msg: %+v\nents: %+v\n", m, r.RaftLog.entries)
+					if m.Commit > r.RaftLog.committed {
+						r.RaftLog.committed = min(r.RaftLog.LastIndex(), m.Commit)
 					}
-				}
-				//r.RaftLog.committed = max(r.RaftLog.committed, min(r.RaftLog.LastIndex(), m.Commit))
-				if m.Commit > r.RaftLog.committed {
-					r.RaftLog.committed = min(r.RaftLog.LastIndex(), m.Commit)
+				} else {
+					if m.Commit > r.RaftLog.committed {
+						r.RaftLog.committed = min(m.Index, m.Commit)
+					}
 				}
 			}
 		}
-
 	}
 	response.Index = r.RaftLog.LastIndex()
 	response.Term = r.Term
@@ -621,19 +652,19 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 // handleHeartbeat handle Heartbeat RPC request
 func (r *Raft) handleHeartbeat(m pb.Message) {
 	// Your Code Here (2A).
-	// fixme: 需要拒绝吗 (是否需要设置 Reject)？
 	li := r.RaftLog.LastIndex()
 	logTerm, err := r.RaftLog.Term(li)
 	if err != nil {
-		panic(logTerm)
+		panic(err)
 	}
 	res := pb.Message{MsgType: pb.MessageType_MsgHeartbeatResponse, From: r.id, To: m.From, LogTerm: logTerm, Index: li}
 	if m.Term >= r.Term {
 		r.becomeFollower(m.Term, m.From)
-		r.RaftLog.committed = min(r.RaftLog.LastIndex(), max(r.RaftLog.committed, m.Commit))
 	} else {
 		res.Reject = true
 	}
+	res.Term = r.Term
+	res.Commit = r.RaftLog.committed
 	r.msgs = append(r.msgs, res)
 }
 

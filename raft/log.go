@@ -117,13 +117,14 @@ func (l *RaftLog) FirstIndex() uint64 {
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
-	if l.FirstIndex() == 0 {
+	if i == 0 {
 		return 0, nil
 	}
-	if i < l.FirstIndex() || i > l.LastIndex() {
+	idx := l.sliceIndex(i)
+	if idx == -1 {
 		return 0, ErrUnavailable
 	}
-	return l.entries[i-l.FirstIndex()].Term, nil
+	return l.entries[idx].Term, nil
 }
 
 func (l *RaftLog) appendEntries(ents []*pb.Entry) {

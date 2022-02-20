@@ -17,7 +17,6 @@ package raft
 import (
 	"bytes"
 	"fmt"
-	"github.com/pingcap-incubator/tinykv/log"
 	"math/rand"
 	"reflect"
 	"testing"
@@ -598,10 +597,6 @@ func TestHandleMessageType_MsgAppend2AB(t *testing.T) {
 		sm := newTestRaft(1, []uint64{1}, 10, 1, storage)
 		sm.becomeFollower(2, None)
 
-		if i == 7 {
-			log.Infof("#%d: \n", i)
-			log.Flag_1 = true
-		}
 		sm.handleAppendEntries(tt.m)
 		if sm.RaftLog.LastIndex() != tt.wIndex {
 			t.Errorf("#%d: lastIndex = %d, want %d", i, sm.RaftLog.LastIndex(), tt.wIndex)
@@ -934,7 +929,7 @@ func TestHeartbeatUpdateCommit2AB(t *testing.T) {
 		for i := 0; i < tt.successCnt; i++ {
 			nt.send(pb.Message{From: 2, To: 2, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
 		}
-		wCommit := uint64(2 + tt.successCnt) // 2 elctions
+		wCommit := uint64(2 + tt.successCnt) // 2 elections
 		if sm2.RaftLog.committed != wCommit {
 			t.Fatalf("#%d: expected sm2 commit: %d, got: %d", i, wCommit, sm2.RaftLog.committed)
 		}
