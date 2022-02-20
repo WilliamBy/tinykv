@@ -80,7 +80,11 @@ func (l *RaftLog) maybeCompact() {
 // unstableEntries return all the unstable entries
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
-	return l.entries[l.sliceIndex(l.stabled)+1:]
+	firstUnstabledIdx := l.sliceIndex(l.stabled + 1)
+	if firstUnstabledIdx == -1 {
+		return []pb.Entry{}
+	}
+	return l.entries[firstUnstabledIdx:]
 }
 
 // nextEnts returns all the committed but not applied entries

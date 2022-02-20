@@ -367,16 +367,7 @@ func (r *Raft) becomeLeader() {
 			r.Prs[peer].Next = lastIndex + 1
 		}
 	}
-	//r.Step(pb.Message{From: r.id, To: r.id, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
-	//向上面这样写通不过测试
-	r.RaftLog.appendEntries([]*pb.Entry{{Term: r.Term, Index: r.RaftLog.LastIndex() + 1}})
-	r.Prs[r.id].Match = r.RaftLog.LastIndex()
-	r.Prs[r.id].Next = r.RaftLog.LastIndex() + 1
-	if len(r.Prs) == 1 {
-		r.RaftLog.committed = r.RaftLog.LastIndex()
-	} else {
-		r.bcastAppend()
-	}
+	r.Step(pb.Message{From: r.id, To: r.id, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -400,8 +391,10 @@ func (r *Raft) stepFollower(m pb.Message) error {
 		r.handleHup()
 	case pb.MessageType_MsgBeat:
 	case pb.MessageType_MsgPropose:
-		m.To = r.Lead
-		r.msgs = append(r.msgs, m)
+		if r.Lead != None {
+			m.To = r.Lead
+			r.msgs = append(r.msgs, m)
+		}
 	case pb.MessageType_MsgAppend:
 		r.handleAppendEntries(m)
 	case pb.MessageType_MsgAppendResponse:
