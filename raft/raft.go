@@ -367,7 +367,9 @@ func (r *Raft) becomeLeader() {
 			r.Prs[peer].Next = lastIndex + 1
 		}
 	}
+	//if len(r.Prs) > 1 {
 	r.Step(pb.Message{From: r.id, To: r.id, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
+	//}
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -681,4 +683,22 @@ func (r *Raft) appendEntries(entries []*pb.Entry) {
 		entries[i].Term = r.Term
 	}
 	r.RaftLog.appendEntries(entries)
+}
+
+func (r *Raft) getSoftState() *SoftState {
+	return &SoftState{
+		Lead:      r.Lead,
+		RaftState: r.State,
+	};
+}
+
+func (r *Raft) getHardState() *pb.HardState {
+	return &pb.HardState{
+		Term:                 r.Term,
+		Vote:                 r.Vote,
+		Commit:               r.RaftLog.committed,
+		XXX_NoUnkeyedLiteral: struct{}{},
+		XXX_unrecognized:     nil,
+		XXX_sizecache:        0,
+	}
 }

@@ -91,6 +91,9 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
 	ents = make([]pb.Entry, 0)
+	if len(l.entries) == 0 {
+		return
+	}
 	si4apply, si4commit := l.sliceIndex(l.applied), l.sliceIndex(l.committed)
 	if si4commit != -1 && si4apply != -1 {
 		ents = l.entries[si4apply+1 : si4commit+1]
